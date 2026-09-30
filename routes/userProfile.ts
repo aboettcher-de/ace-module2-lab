@@ -21,6 +21,19 @@ function favicon () {
   return utils.extractFilename(config.get('application.favicon'))
 }
 
+function sanitizeUsername (username: string): string {
+  let sanitized = username.replace(/[\r\n]/g, '')
+  if (sanitized.length === 0) {
+    return ''
+  }
+  sanitized = sanitized.replace(/\\/g, '\\\\')
+  sanitized = sanitized.replace(/([#!]\{|#\[)/g, '\\$1')
+  if (!sanitized.startsWith('\\')) {
+    sanitized = '\\' + sanitized
+  }
+  return sanitized
+}
+
 export function getUserProfile () {
   return async (req: Request, res: Response, next: NextFunction) => {
     let template: string
@@ -51,9 +64,10 @@ export function getUserProfile () {
 
     let username = user.username
 
-    if (username?.match(/#{(.*)}/) !== null && utils.isChallengeEnabled(challenges.usernameXssChallenge)) {
+    const match = username?.match(/^#{(.*)}$/s)
+    if (match && utils.isChallengeEnabled(challenges.usernameXssChallenge)) {
       req.app.locals.abused_ssti_bug = true
-      const code = username?.substring(2, username.length - 1)
+      const code = match[1]
       try {
         if (!code) {
           throw new Error('Username is null')
@@ -73,12 +87,12 @@ export function getUserProfile () {
         if (!isSafe) {
           throw new Error('Unsafe code execution blocked')
         }
-        username = eval(code) // eslint-disable-line no-eval
+        username = String(eval(code)).replace(/[\r\n]/g, '') // eslint-disable-line no-eval
       } catch (err) {
-        username = '\\' + username
+        username = sanitizeUsername(user.username ?? username)
       }
-    } else {
-      username = '\\' + username
+    } else if (username) {
+      username = sanitizeUsername(username)
     }
 
     const themeKey = config.get<string>('application.theme') as keyof typeof themes
